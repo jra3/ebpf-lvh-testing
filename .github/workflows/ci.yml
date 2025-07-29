@@ -67,7 +67,7 @@ jobs:
     - name: Install VM dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y qemu-system-x86 cpu-checker mmdebstrap
+        sudo apt-get install -y qemu-system-x86 cpu-checker mmdebstrap debian-archive-keyring
         
         # Check virtualization support
         if kvm-ok; then

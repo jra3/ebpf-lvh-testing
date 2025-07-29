@@ -2,20 +2,8 @@
   {
     "name": "bpf-test",
     "packages": [
-      "bpftool",
-      "libbpf-dev",
-      "build-essential",
-      "make",
-      "clang",
-      "llvm",
-      "linux-tools-generic",
-      "linux-headers-generic",
-      "iproute2",
-      "util-linux",
-      "mount",
-      "bash",
-      "coreutils"
+      "bpftool"
     ],
-    "rootfs_size": "4G"
+    "rootfs_size": "2G"
   }
 ]
