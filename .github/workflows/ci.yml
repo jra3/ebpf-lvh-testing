@@ -84,31 +84,24 @@ jobs:
           exit 1
         }
     
-    - name: Build VM image
+    - name: Prepare test environment
       run: |
-        # Cache check
-        CACHE_KEY="bpf-test-image-v1"
-        CACHE_PATH="${HOME}/.cache/lvh-images"
+        # Skip complex VM image building in CI
+        # Instead, use a minimal approach with initramfs
         
-        if [ -f "${CACHE_PATH}/${CACHE_KEY}/rootfs.img" ]; then
-          echo "Using cached image"
-          mkdir -p vm-images
-          cp -r "${CACHE_PATH}/${CACHE_KEY}"/* vm-images/
+        # Download Alpine rootfs for minimal test environment
+        ARCH=$(uname -m)
+        if [ "$ARCH" = "x86_64" ]; then
+          ALPINE_ARCH="x86_64"
         else
-          echo "Building new image..."
-          
-          # Create output directory and copy images.json there
-          # LVH expects images.json in the output directory
-          mkdir -p vm-images
-          cp images.json vm-images/
-          
-          # Build the image
-          lvh images build --dir vm-images --image bpf-test
-          
-          # Cache for future runs
-          mkdir -p "${CACHE_PATH}/${CACHE_KEY}"
-          cp vm-images/* "${CACHE_PATH}/${CACHE_KEY}/" || true
+          ALPINE_ARCH="aarch64"
         fi
+        
+        ROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/${ALPINE_ARCH}/alpine-minirootfs-3.19.0-${ALPINE_ARCH}.tar.gz"
+        wget -q -O alpine-rootfs.tar.gz "$ROOTFS_URL"
+        
+        # Create test directory
+        mkdir -p vm-test-env
     
     - name: Create test runner script
       run: |
