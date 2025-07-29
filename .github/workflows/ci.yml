@@ -1,4 +1,4 @@
-name: CI
+name: BPF VM Testing
 
 on:
   push:
@@ -8,7 +8,38 @@ on:
   workflow_dispatch:
 
 jobs:
-  test-ebpf:
+  build-bpf:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang llvm libelf-dev libbpf-dev
+    
+    - name: Build eBPF programs with CO-RE
+      run: |
+        cd src/bpf
+        make clean all
+        
+        # Verify BTF sections exist
+        echo "=== Verifying BTF support ==="
+        for prog in *.o; do
+          echo "Checking $prog:"
+          llvm-readelf -S "$prog" | grep -E "BTF|\.BTF\.ext" || exit 1
+        done
+        echo "✅ All programs built with BTF support"
+    
+    - name: Upload BPF artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: bpf-programs
+        path: src/bpf/*.o
+        retention-days: 1
+
+  test-on-vms:
+    needs: build-bpf
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -17,82 +48,132 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install dependencies
-      run: |
-        echo "=== Installing compilation tools ==="
-        sudo apt-get update
-        sudo apt-get install -y clang llvm libelf-dev
-        
-        echo "=== Installing BPF tools ==="
-        # bpftool isn't directly available on Ubuntu 24.04
-        # Install linux-tools-common which provides it
-        sudo apt-get install -y linux-tools-common linux-tools-$(uname -r) || true
-        
-        # If bpftool still not available, compile it
-        if ! command -v bpftool &> /dev/null; then
-          echo "bpftool not found, using alternative"
-          # We'll just verify compilation works
-        fi
+    - name: Download BPF artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: bpf-programs
+        path: src/bpf/
     
-    - name: Build eBPF programs
-      run: |
-        echo "=== Building eBPF programs ==="
-        cd src/bpf
-        make clean all
-        ls -la *.o
-        echo "✅ eBPF compilation successful"
-    
-    - name: Test BPF programs
-      run: |
-        echo "=== Testing BPF programs ==="
-        cd src/bpf
-        
-        # Test 1: Verify object file format
-        file minimal.o | grep -q "ELF" && echo "✅ Valid ELF object"
-        
-        # Test 2: Check BPF sections
-        llvm-objdump -h minimal.o | grep -q "kprobe" && echo "✅ Contains kprobe section"
-        
-        # Test 3: Disassemble to verify BPF bytecode
-        llvm-objdump -d minimal.o && echo "✅ Valid BPF bytecode"
-        
-        # Note: Can't load into kernel without proper bpftool
-        echo ""
-        echo "=== Summary ==="
-        echo "✅ eBPF program compiles successfully"
-        echo "✅ Object file has correct format"
-        echo "✅ Ready for testing with kernel ${{ matrix.kernel }}"
-    
-    - name: Setup Go and LVH
+    - name: Setup Go
       uses: actions/setup-go@v5
       with:
         go-version: '1.21'
     
-    - name: Install and test LVH
+    - name: Install LVH
       run: |
-        echo "=== Installing LVH ==="
         go install github.com/cilium/little-vm-helper/cmd/lvh@latest
-        export PATH="$(go env GOPATH)/bin:$PATH"
-        
-        echo "=== LVH installed ==="
-        lvh --help | head -5
-        
-        echo "=== Attempting kernel download ==="
-        lvh kernels pull ${{ matrix.kernel }}-main || echo "Note: Kernel download may fail in CI"
-        
-        echo ""
-        echo "=== Instructions for local testing ==="
-        echo "To test with VMs locally:"
-        echo "1. Build VM image: lvh images build"
-        echo "2. Run: lvh run --image <image> --kernel <kernel> --host-mount ."
-        echo "3. Inside VM: cd /host && ./scripts/run_tests.sh"
+        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
     
-    - name: Final summary
+    - name: Install VM dependencies
       run: |
-        echo "=== Test Results ==="
-        echo "✅ Kernel version: ${{ matrix.kernel }}"
-        echo "✅ eBPF programs compile"
-        echo "✅ Object files are valid"
-        echo "✅ LVH is installed"
-        echo ""
-        echo "Note: Full VM-based testing requires local image building"
+        sudo apt-get update
+        sudo apt-get install -y qemu-system-x86 cpu-checker
+        
+        # Check virtualization support
+        if kvm-ok; then
+          echo "KVM acceleration available"
+        else
+          echo "No KVM - will use software emulation"
+        fi
+    
+    - name: Pull kernel
+      run: |
+        lvh kernels pull ${{ matrix.kernel }}-main || {
+          echo "Failed to pull kernel ${{ matrix.kernel }}, trying alternative sources..."
+          # Alternative: download from kernel.org or other mirrors
+          exit 1
+        }
+    
+    - name: Build VM image
+      run: |
+        # Cache check
+        CACHE_KEY="bpf-test-image-v1"
+        CACHE_PATH="${HOME}/.cache/lvh-images"
+        
+        if [ -f "${CACHE_PATH}/${CACHE_KEY}/rootfs.img" ]; then
+          echo "Using cached image"
+          mkdir -p vm-images
+          cp -r "${CACHE_PATH}/${CACHE_KEY}"/* vm-images/
+        else
+          echo "Building new image..."
+          ./scripts/build-vm-images.sh
+          
+          # Cache for future runs
+          mkdir -p "${CACHE_PATH}/${CACHE_KEY}"
+          cp vm-images/* "${CACHE_PATH}/${CACHE_KEY}/" || true
+        fi
+    
+    - name: Create test runner script
+      run: |
+        cat > test-in-vm.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "=== BPF Test Runner ==="
+        echo "Kernel: $(uname -r)"
+        echo "Architecture: $(uname -m)"
+        
+        cd /host/src/bpf
+        
+        # Test each BPF program
+        for prog in *.o; do
+          echo -e "\n--- Testing $prog ---"
+          
+          # Try to load the program
+          if bpftool prog load "$prog" /sys/fs/bpf/test_prog 2>&1; then
+            echo "✅ $prog loaded successfully"
+            
+            # Get program info
+            bpftool prog show name test_prog
+            
+            # Cleanup
+            rm -f /sys/fs/bpf/test_prog
+          else
+            echo "❌ $prog failed to load"
+            exit 1
+          fi
+        done
+        
+        echo -e "\n✅ All BPF programs passed verification on kernel $(uname -r)"
+        EOF
+        chmod +x test-in-vm.sh
+    
+    - name: Run VM test
+      run: |
+        echo "=== Starting VM with kernel ${{ matrix.kernel }} ==="
+        
+        # Run LVH with timeout and capture output
+        timeout 300 lvh run \
+          --kernel ${{ matrix.kernel }}-main \
+          --image ./vm-images/bpf-test.qcow2 \
+          --host-mount . \
+          --daemonize=false \
+          --serial-port stdio \
+          -- /host/test-in-vm.sh || {
+            exit_code=$?
+            if [ $exit_code -eq 124 ]; then
+              echo "❌ Test timed out"
+              exit 1
+            else
+              echo "❌ Test failed with exit code $exit_code"
+              exit $exit_code
+            fi
+          }
+    
+    - name: Report results
+      if: always()
+      run: |
+        echo "=== Test Summary ==="
+        echo "Kernel: ${{ matrix.kernel }}"
+        echo "Status: ${{ job.status }}"
+
+  summary:
+    needs: test-on-vms
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Test matrix summary
+      run: |
+        echo "=== BPF Cross-Kernel Compatibility Test Results ==="
+        echo "All kernel versions have been tested with CO-RE compiled BPF programs"

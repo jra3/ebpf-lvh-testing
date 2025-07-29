@@ -18,7 +18,7 @@ _kernels/
 # VM images
 *.qcow2
 *.img
-images.json
+vm-images/
 
 # Kernel files
 bzImage
