@@ -24,18 +24,27 @@ echo "Building BPF test image..."
 cd "${PROJECT_ROOT}"
 
 # Use LVH to build the image based on images.json
-# First check the correct syntax
+# LVH expects images.json in the current directory or specified with full path
 echo "Config file: ${PROJECT_ROOT}/images.json"
 echo "Output dir: ${IMAGES_DIR}"
+echo "Current dir: $(pwd)"
 
-# Try the build
-lvh images build \
-    --dir "${IMAGES_DIR}" \
-    bpf-test || {
-    echo "Failed with new syntax, trying alternative..."
-    cd "${PROJECT_ROOT}"
-    lvh images build --image bpf-test
-}
+# Copy images.json to where LVH expects it or use the right syntax
+cd "${PROJECT_ROOT}"
+
+# Try different LVH syntaxes based on version
+if lvh images build --help 2>&1 | grep -q "config"; then
+    # Newer syntax with --config
+    lvh images build \
+        --config "${PROJECT_ROOT}/images.json" \
+        --dir "${IMAGES_DIR}" \
+        bpf-test
+else
+    # Older syntax - LVH looks for images.json in current dir
+    lvh images build \
+        --dir "${IMAGES_DIR}" \
+        --image bpf-test
+fi
 
 echo "VM image built successfully!"
 echo "Image location: ${IMAGES_DIR}"
