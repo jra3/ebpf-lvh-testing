@@ -1,0 +1,84 @@
+name: Debug LVH
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+    
+    - name: Debug environment
+      run: |
+        echo "=== System info ==="
+        uname -a
+        echo "=== CPU info ==="
+        lscpu | grep -E "Architecture|CPU\(s\)|Model name"
+        echo "=== Memory ==="
+        free -h
+        echo "=== Disk space ==="
+        df -h
+    
+    - name: Install LVH
+      run: |
+        echo "=== Installing LVH ==="
+        go install github.com/cilium/little-vm-helper/cmd/lvh@latest
+        echo "PATH=$PATH:$(go env GOPATH)/bin" >> $GITHUB_ENV
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        echo "=== LVH location ==="
+        which lvh || echo "lvh not found in PATH"
+        echo "=== Go env ==="
+        go env GOPATH
+        ls -la $(go env GOPATH)/bin/ || true
+    
+    - name: Test LVH commands
+      run: |
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        echo "=== LVH version ==="
+        $(go env GOPATH)/bin/lvh version || echo "Failed to get version"
+        echo "=== List kernels ==="
+        $(go env GOPATH)/bin/lvh kernels list || echo "Failed to list kernels"
+    
+    - name: Try to pull a kernel
+      run: |
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        echo "=== Pulling 5.15 kernel ==="
+        $(go env GOPATH)/bin/lvh kernels pull 5.15-main || {
+          echo "Failed to pull kernel, trying with verbose"
+          $(go env GOPATH)/bin/lvh kernels pull 5.15-main -v || echo "Still failed"
+        }
+        echo "=== Check kernel location ==="
+        find $HOME -name "bzImage" -type f 2>/dev/null | head -10 || echo "No kernel images found"
+    
+    - name: Download and test VM image
+      run: |
+        echo "=== Downloading VM image ==="
+        # Try the latest release
+        curl -L -o base.qcow2.zst https://github.com/cilium/little-vm-helper/releases/download/v0.0.16/base.qcow2.zst || {
+          echo "Failed v0.0.16, trying v0.0.15"
+          curl -L -o base.qcow2.zst https://github.com/cilium/little-vm-helper/releases/download/v0.0.15/base.qcow2.zst
+        }
+        
+        echo "=== Decompressing ==="
+        sudo apt-get install -y zstd
+        zstd -d base.qcow2.zst
+        ls -lh base.qcow2
+    
+    - name: Test QEMU
+      run: |
+        echo "=== Installing QEMU ==="
+        sudo apt-get update
+        sudo apt-get install -y qemu-system-x86
+        echo "=== QEMU version ==="
+        qemu-system-x86_64 --version
+        echo "=== Test QEMU ==="
+        timeout 5 qemu-system-x86_64 -version || true
