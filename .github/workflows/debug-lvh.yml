@@ -43,10 +43,10 @@ jobs:
     - name: Test LVH commands
       run: |
         export PATH="$(go env GOPATH)/bin:$PATH"
-        echo "=== LVH version ==="
-        $(go env GOPATH)/bin/lvh version || echo "Failed to get version"
-        echo "=== List kernels ==="
-        $(go env GOPATH)/bin/lvh kernels list || echo "Failed to list kernels"
+        echo "=== LVH help ==="
+        $(go env GOPATH)/bin/lvh --help || echo "Failed to get help"
+        echo "=== LVH kernels help ==="
+        $(go env GOPATH)/bin/lvh kernels --help || echo "Failed to get kernels help"
     
     - name: Try to pull a kernel
       run: |
@@ -58,19 +58,17 @@ jobs:
         }
         echo "=== Check kernel location ==="
         find $HOME -name "bzImage" -type f 2>/dev/null | head -10 || echo "No kernel images found"
+        echo "=== Check .cache directory ==="
+        ls -la $HOME/.cache/lvh/kernels/ 2>/dev/null || echo "No .cache/lvh/kernels directory"
     
     - name: Download and test VM image
       run: |
-        echo "=== Downloading VM image ==="
-        # Try the latest release
-        curl -L -o base.qcow2.zst https://github.com/cilium/little-vm-helper/releases/download/v0.0.16/base.qcow2.zst || {
-          echo "Failed v0.0.16, trying v0.0.15"
-          curl -L -o base.qcow2.zst https://github.com/cilium/little-vm-helper/releases/download/v0.0.15/base.qcow2.zst
-        }
+        echo "=== Checking available VM images ==="
+        curl -s https://api.github.com/repos/cilium/little-vm-helper/releases/latest | grep -E "browser_download_url.*qcow2" || echo "No qcow2 in latest"
         
-        echo "=== Decompressing ==="
-        sudo apt-get install -y zstd
-        zstd -d base.qcow2.zst
+        echo "=== Downloading VM image from older release ==="
+        # Try v0.0.12 which we know has the image
+        wget -O base.qcow2 https://github.com/cilium/little-vm-helper/releases/download/v0.0.12/base.qcow2
         ls -lh base.qcow2
     
     - name: Test QEMU
