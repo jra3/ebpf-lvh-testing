@@ -1,0 +1,26 @@
+name: Minimal BPF Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  compile-only:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install minimal deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-15 llvm-15 libelf-dev
+    
+    - name: Compile BPF
+      run: |
+        cd src/bpf
+        clang-15 -O2 -g -target bpf -c simple_kprobe.c -o simple_kprobe.o
+        llvm-objdump-15 -d simple_kprobe.o
+        echo "Compilation successful!"

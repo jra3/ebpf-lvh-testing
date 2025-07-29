@@ -1,0 +1,51 @@
+name: Simple eBPF Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang llvm libelf-dev libbpf-dev gcc-multilib bpftool
+    
+    - name: Compile eBPF program
+      run: |
+        echo "=== Compiling eBPF program ==="
+        make -C src/bpf clean all
+        ls -la src/bpf/
+    
+    - name: Test BPF program locally
+      run: |
+        echo "=== Testing BPF verifier ==="
+        sudo bpftool prog load src/bpf/simple_kprobe.o /sys/fs/bpf/test_prog
+        sudo bpftool prog show name trace_open
+        sudo rm -f /sys/fs/bpf/test_prog
+        echo "BPF program verified successfully!"
+    
+    - name: Install and test LVH
+      run: |
+        echo "=== Installing LVH ==="
+        go install github.com/cilium/little-vm-helper/cmd/lvh@latest
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        
+        echo "=== Testing LVH installation ==="
+        lvh version || echo "LVH version command not found"
+        
+        echo "=== Listing available kernels ==="
+        lvh kernels list || echo "Failed to list kernels"
