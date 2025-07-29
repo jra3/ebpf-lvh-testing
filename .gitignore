@@ -18,6 +18,11 @@ _kernels/
 # VM images
 *.qcow2
 *.img
+images.json
+
+# Kernel files
+bzImage
+vmlinuz*
 
 # Test results
 test-results/
@@ -33,3 +38,11 @@ test-results/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Go
+go.mod
+go.sum
+
+# LVH
+.lvh/
+kernels/

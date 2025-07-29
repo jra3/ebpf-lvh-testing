@@ -1,4 +1,4 @@
-name: Final Working Test
+name: CI
 
 on:
   push:
