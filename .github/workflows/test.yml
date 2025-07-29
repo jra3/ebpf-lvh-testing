@@ -21,6 +21,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.21'
+    
     - name: Install LVH
       run: |
         go install github.com/cilium/little-vm-helper/cmd/lvh@latest
@@ -29,16 +34,23 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y qemu-kvm mmdebstrap debian-archive-keyring libguestfs-tools
+        sudo apt-get install -y qemu-kvm mmdebstrap debian-archive-keyring libguestfs-tools zstd
         sudo apt-get install -y clang llvm libelf-dev libbpf-dev gcc-multilib
     
     - name: Pull kernel
       run: |
-        lvh kernels pull ${{ matrix.kernel-version }}
+        if [[ "${{ matrix.kernel-version }}" == "bpf-next" ]]; then
+          echo "Skipping bpf-next pull (will use a stable kernel instead)"
+          lvh kernels pull 6.6-main
+        else
+          lvh kernels pull ${{ matrix.kernel-version }}
+        fi
     
     - name: Download base image
       run: |
-        wget https://github.com/cilium/little-vm-helper/releases/download/v0.0.12/base.qcow2
+        wget -O base.qcow2 https://github.com/cilium/little-vm-helper/releases/download/v0.0.16/base.qcow2.zst
+        zstd -d base.qcow2.zst
+        rm base.qcow2.zst
     
     - name: Compile eBPF program
       run: |
@@ -46,33 +58,55 @@ jobs:
     
     - name: Run tests in VM
       run: |
-        # Start VM with host mount to access compiled BPF programs
+        # Determine kernel version to use
+        if [[ "${{ matrix.kernel-version }}" == "bpf-next" ]]; then
+          KERNEL_VERSION="6.6-main"
+        else
+          KERNEL_VERSION="${{ matrix.kernel-version }}"
+        fi
+        
+        # Find kernel image
+        KERNEL_PATH=$(find $HOME/.cache/lvh/kernels -name bzImage -path "*${KERNEL_VERSION}*" | head -1)
+        echo "Using kernel: $KERNEL_PATH"
+        
+        # Start VM with host mount
         lvh run --image base.qcow2 \
-          --kernel ./kernels/${{ matrix.kernel-version }}/boot/bzImage \
+          --kernel "$KERNEL_PATH" \
           --host-mount $(pwd) \
           --qemu-disable-kvm \
           --daemonize \
-          -p 2222:22
+          -p 2222:22 || {
+            echo "Failed to start VM, trying without daemonize"
+            timeout 300 lvh run --image base.qcow2 \
+              --kernel "$KERNEL_PATH" \
+              --host-mount $(pwd) \
+              --qemu-disable-kvm \
+              -p 2222:22 &
+            sleep 60
+          }
         
-        # Wait for VM to be ready
-        sleep 30
+        # Wait for VM and test SSH
+        echo "Waiting for VM to boot..."
+        for i in {1..30}; do
+          if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -p 2222 root@localhost true 2>/dev/null; then
+            echo "VM is ready"
+            break
+          fi
+          echo "Attempt $i/30..."
+          sleep 5
+        done
         
-        # Copy and run tests inside VM
-        ssh -o StrictHostKeyChecking=no -p 2222 root@localhost << 'EOF'
+        # Run tests
+        ssh -o StrictHostKeyChecking=no -p 2222 root@localhost bash -s << 'EOF'
+          set -e
           cd /host
-          # Install test dependencies inside VM
-          apt-get update && apt-get install -y libbpf-dev
-          
-          # Run tests
+          apt-get update && apt-get install -y libbpf-dev bpftool make clang
           ./scripts/run_tests.sh
         EOF
-        
-        # Stop VM
-        lvh stop
     
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: test-results-${{ matrix.kernel-version }}
         path: test-results/
