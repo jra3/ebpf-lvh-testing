@@ -61,15 +61,16 @@ jobs:
         echo "=== Check .cache directory ==="
         ls -la $HOME/.cache/lvh/kernels/ 2>/dev/null || echo "No .cache/lvh/kernels directory"
     
-    - name: Download and test VM image
+    - name: Check LVH image options
       run: |
-        echo "=== Checking available VM images ==="
-        curl -s https://api.github.com/repos/cilium/little-vm-helper/releases/latest | grep -E "browser_download_url.*qcow2" || echo "No qcow2 in latest"
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        echo "=== LVH expects images to be built or pulled from OCI ==="
         
-        echo "=== Downloading VM image from older release ==="
-        # Try v0.0.12 which we know has the image
-        wget -O base.qcow2 https://github.com/cilium/little-vm-helper/releases/download/v0.0.12/base.qcow2
-        ls -lh base.qcow2
+        echo "=== Check OCI images ==="
+        docker pull quay.io/lvh-images/root-images:main --dry-run 2>&1 || echo "OCI image check"
+        
+        echo "=== Generate example image config ==="
+        lvh images example-config || echo "Failed to generate example config"
     
     - name: Test QEMU
       run: |
