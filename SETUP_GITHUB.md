@@ -15,12 +15,17 @@ Go to https://github.com/new and create a new repository with:
 After creating the empty repository, run these commands:
 
 ```bash
-# Add your GitHub repository as remote (replace YOUR_USERNAME)
-git remote add origin https://github.com/YOUR_USERNAME/ebpf-lvh-testing.git
+# Add your GitHub repository as remote using SSH (replace YOUR_USERNAME)
+git remote add origin git@github.com:YOUR_USERNAME/ebpf-lvh-testing.git
 
 # Push the code
 git push -u origin main
 ```
+
+**Note:** Make sure you have:
+1. SSH keys set up with GitHub (check with `ssh -T git@github.com`)
+2. If not, generate keys: `ssh-keygen -t ed25519 -C "your_email@example.com"`
+3. Add the public key to GitHub: Settings → SSH and GPG keys → New SSH key
 
 ## 3. Enable GitHub Actions
 
