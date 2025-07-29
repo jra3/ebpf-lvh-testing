@@ -96,7 +96,14 @@ jobs:
           cp -r "${CACHE_PATH}/${CACHE_KEY}"/* vm-images/
         else
           echo "Building new image..."
-          ./scripts/build-vm-images.sh
+          
+          # Create output directory and copy images.json there
+          # LVH expects images.json in the output directory
+          mkdir -p vm-images
+          cp images.json vm-images/
+          
+          # Build the image
+          lvh images build --dir vm-images --image bpf-test
           
           # Cache for future runs
           mkdir -p "${CACHE_PATH}/${CACHE_KEY}"
