@@ -1,0 +1,45 @@
+name: Test with Docker Images
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-docker:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check Docker images
+      run: |
+        echo "=== Search for LVH images on Docker Hub ==="
+        curl -s "https://hub.docker.com/v2/repositories/cilium/little-vm-helper-images/tags/" | \
+          jq -r '.results[].name' | head -10 || echo "Failed to list tags"
+        
+        echo "=== Check GitHub Container Registry ==="
+        curl -s "https://ghcr.io/v2/cilium/little-vm-helper-images/tags/list" || echo "No public access"
+    
+    - name: Download from container image
+      run: |
+        echo "=== Try to extract VM image from Docker ==="
+        # Pull a specific kernel image
+        docker pull quay.io/lvh-images/kernel-images:5.10-main || \
+          docker pull cilium/little-vm-helper-kernel-images:5.10-main || \
+          echo "Failed to pull kernel images"
+        
+        # List what we got
+        docker images
+        
+        # Try to extract files
+        if docker images | grep -q "kernel-images"; then
+          IMAGE=$(docker images | grep kernel-images | awk '{print $1":"$2}' | head -1)
+          echo "Found image: $IMAGE"
+          
+          # Create container and copy files
+          docker create --name extract $IMAGE
+          docker cp extract:/ extracted/ || echo "Failed to extract"
+          find extracted -name "*.qcow2" -o -name "bzImage" 2>/dev/null | head -10
+          docker rm extract
+        fi
