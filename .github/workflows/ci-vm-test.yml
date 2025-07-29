@@ -130,11 +130,10 @@ jobs:
         
         echo "Using kernel: $KERNEL_IMAGE"
         
-        # Run QEMU (x86_64 version for CI)
-        timeout 60 qemu-system-x86_64 \
+        # Run QEMU (x86_64 version for CI, without KVM)
+        timeout 120 qemu-system-x86_64 \
           -M pc \
-          -cpu host \
-          -enable-kvm \
+          -cpu max \
           -m 1G \
           -kernel "$KERNEL_IMAGE" \
           -initrd initramfs.gz \
