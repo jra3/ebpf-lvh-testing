@@ -1,0 +1,35 @@
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Build directories
+build/
+_data/
+_kernels/
+
+# VM images
+*.qcow2
+*.img
+
+# Test results
+test-results/
+*.log
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,78 @@
+name: eBPF Tests with LVH
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-ebpf:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        kernel-version:
+          - "5.15-main"
+          - "6.1-main"
+          - "6.6-main"
+          - "bpf-next"
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install LVH
+      run: |
+        go install github.com/cilium/little-vm-helper/cmd/lvh@latest
+        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y qemu-kvm mmdebstrap debian-archive-keyring libguestfs-tools
+        sudo apt-get install -y clang llvm libelf-dev libbpf-dev gcc-multilib
+    
+    - name: Pull kernel
+      run: |
+        lvh kernels pull ${{ matrix.kernel-version }}
+    
+    - name: Download base image
+      run: |
+        wget https://github.com/cilium/little-vm-helper/releases/download/v0.0.12/base.qcow2
+    
+    - name: Compile eBPF program
+      run: |
+        make -C src/bpf clean all
+    
+    - name: Run tests in VM
+      run: |
+        # Start VM with host mount to access compiled BPF programs
+        lvh run --image base.qcow2 \
+          --kernel ./kernels/${{ matrix.kernel-version }}/boot/bzImage \
+          --host-mount $(pwd) \
+          --qemu-disable-kvm \
+          --daemonize \
+          -p 2222:22
+        
+        # Wait for VM to be ready
+        sleep 30
+        
+        # Copy and run tests inside VM
+        ssh -o StrictHostKeyChecking=no -p 2222 root@localhost << 'EOF'
+          cd /host
+          # Install test dependencies inside VM
+          apt-get update && apt-get install -y libbpf-dev
+          
+          # Run tests
+          ./scripts/run_tests.sh
+        EOF
+        
+        # Stop VM
+        lvh stop
+    
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results-${{ matrix.kernel-version }}
+        path: test-results/
