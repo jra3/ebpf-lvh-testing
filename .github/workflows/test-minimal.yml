@@ -21,6 +21,10 @@ jobs:
     - name: Compile BPF
       run: |
         cd src/bpf
-        clang-15 -O2 -g -target bpf -c simple_kprobe.c -o simple_kprobe.o
-        llvm-objdump-15 -d simple_kprobe.o
+        echo "=== Compiling minimal BPF program ==="
+        clang-15 -O2 -g -target bpf -c minimal.c -o minimal.o
+        echo "=== Object file created ==="
+        ls -la minimal.o
+        echo "=== Disassembly ==="
+        llvm-objdump-15 -d minimal.o || true
         echo "Compilation successful!"

@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y clang llvm libelf-dev libbpf-dev gcc-multilib bpftool
+        sudo apt-get install -y clang llvm libelf-dev libbpf-dev gcc-multilib bpftool linux-headers-$(uname -r)
     
     - name: Compile eBPF program
       run: |
