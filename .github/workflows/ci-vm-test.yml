@@ -13,6 +13,15 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Cache apt packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          /var/cache/apt/archives
+        key: apt-packages-${{ runner.os }}-${{ hashFiles('.github/workflows/ci-vm-test.yml') }}
+        restore-keys: |
+          apt-packages-${{ runner.os }}-
+    
     - name: Install build dependencies
       run: |
         sudo apt-get update
@@ -69,17 +78,34 @@ jobs:
         go install github.com/cilium/little-vm-helper/cmd/lvh@latest
         echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
     
+    - name: Cache kernels
+      uses: actions/cache@v4
+      id: kernel-cache
+      with:
+        path: vm-test-work/${{ matrix.kernel }}-main
+        key: kernel-${{ matrix.kernel }}-${{ runner.os }}-v1
+    
     - name: Download kernel
+      if: steps.kernel-cache.outputs.cache-hit != 'true'
       run: |
         mkdir -p vm-test-work
         cd vm-test-work
         lvh kernels pull ${{ matrix.kernel }}-main
     
+    - name: Cache Alpine rootfs
+      uses: actions/cache@v4
+      id: alpine-cache
+      with:
+        path: alpine-rootfs.tar.gz
+        key: alpine-rootfs-3.19.0-x86_64
+    
     - name: Prepare test environment
       run: |
-        # Download Alpine rootfs
-        ROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-minirootfs-3.19.0-x86_64.tar.gz"
-        wget -q -O alpine-rootfs.tar.gz "$ROOTFS_URL"
+        # Download Alpine rootfs if not cached
+        if [ ! -f alpine-rootfs.tar.gz ]; then
+          ROOTFS_URL="https://dl-cdn.alpinelinux.org/alpine/v3.19/releases/x86_64/alpine-minirootfs-3.19.0-x86_64.tar.gz"
+          wget -q -O alpine-rootfs.tar.gz "$ROOTFS_URL"
+        fi
         
         # Create initramfs
         mkdir -p initramfs
@@ -173,3 +199,10 @@ jobs:
       run: |
         echo "=== BPF Cross-Kernel Compatibility Test Results ==="
         echo "All kernel versions have been tested with CO-RE compiled BPF programs"
+        echo ""
+        echo "Performance improvements:"
+        echo "- Kernel downloads are cached"
+        echo "- Alpine rootfs is cached"
+        echo "- Build dependencies are cached"
+        echo ""
+        echo "Cache will speed up subsequent runs significantly!"
