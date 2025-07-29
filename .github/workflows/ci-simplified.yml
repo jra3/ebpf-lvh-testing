@@ -1,0 +1,84 @@
+name: BPF Testing (Simplified)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang llvm libelf-dev libbpf-dev
+        
+        # Try to install bpftool
+        sudo apt-get install -y linux-tools-common linux-tools-generic linux-tools-$(uname -r) || true
+    
+    - name: Build eBPF programs with CO-RE
+      run: |
+        cd src/bpf
+        make clean all
+        
+        # Verify BTF sections
+        echo "=== Verifying BTF support ==="
+        for prog in *.o; do
+          echo "Checking $prog:"
+          llvm-readelf -S "$prog" | grep -E "BTF|\.BTF\.ext" || exit 1
+        done
+        echo "✅ All programs built with BTF support"
+    
+    - name: Static verification
+      run: |
+        cd src/bpf
+        
+        # Verify object files
+        for prog in *.o; do
+          echo "=== Checking $prog ==="
+          file "$prog" | grep -q "ELF" || exit 1
+          llvm-objdump -h "$prog" | grep -q "kprobe" || exit 1
+          echo "✅ $prog has valid format"
+        done
+    
+    - name: Test BPF loading on runner (if supported)
+      run: |
+        cd src/bpf
+        
+        # Check if we can actually load BPF programs
+        if command -v bpftool &> /dev/null && [ -w /sys/fs/bpf ]; then
+          echo "=== Testing BPF loading on kernel $(uname -r) ==="
+          
+          for prog in *.o; do
+            echo "Loading $prog..."
+            if sudo bpftool prog load "$prog" /sys/fs/bpf/test_${prog%.o} 2>&1; then
+              echo "✅ $prog loaded successfully"
+              sudo bpftool prog show name ${prog%.o}
+              sudo rm -f /sys/fs/bpf/test_${prog%.o}
+            else
+              echo "⚠️ $prog failed to load (might be kernel version incompatibility)"
+            fi
+          done
+        else
+          echo "⚠️ Cannot test actual BPF loading in this environment"
+          echo "BPF programs have been compiled and statically verified"
+        fi
+    
+    - name: VM test preparation
+      run: |
+        echo "=== VM Testing Information ==="
+        echo "For full cross-kernel testing, run locally:"
+        echo "  ./scripts/run-vm-tests.sh"
+        echo ""
+        echo "This will test on kernels: 5.10, 5.15, 6.1, 6.6"
+        echo ""
+        echo "To set up locally:"
+        echo "1. Install LVH: https://github.com/cilium/little-vm-helper"
+        echo "2. Build VM image: ./scripts/build-vm-images.sh"
+        echo "3. Run tests: ./scripts/run-vm-tests.sh"

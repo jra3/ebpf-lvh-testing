@@ -24,9 +24,18 @@ echo "Building BPF test image..."
 cd "${PROJECT_ROOT}"
 
 # Use LVH to build the image based on images.json
+# First check the correct syntax
+echo "Config file: ${PROJECT_ROOT}/images.json"
+echo "Output dir: ${IMAGES_DIR}"
+
+# Try the build
 lvh images build \
     --dir "${IMAGES_DIR}" \
-    --image bpf-test
+    bpf-test || {
+    echo "Failed with new syntax, trying alternative..."
+    cd "${PROJECT_ROOT}"
+    lvh images build --image bpf-test
+}
 
 echo "VM image built successfully!"
 echo "Image location: ${IMAGES_DIR}"
